@@ -247,16 +247,34 @@ jobs:
         run: |
           set -euo pipefail
           img="$(ls UniXNU/out/sheng/macos-*/*/userdata/userdata-root.img | head -1)"
+          echo "userdata image: $img"
           ls -l "$img"
+          # 用 userdata 的精确目录定位产物目录，避免 glob 歧义
+          outdir="$(dirname "$(dirname "$img")")"
+          echo "outdir: $outdir"
           mkdir -p ship
           # zstd 多线程压缩：稀疏镜像压缩率远高于 gzip -1，体积更小、上传/下载更快
           zstd -3 -T0 -c "$img" | split -b 1900m - ship/userdata-root.img.zst.part
-          cp "$(dirname "$img")/userdata-root.json" ship/ 2>/dev/null || true
-          cp UniXNU/out/sheng/macos-*/*/boot/boot.img ship/ 2>/dev/null || true
-          cp UniXNU/out/sheng/macos-*/*/payload/payload.img ship/ 2>/dev/null || true
-          cp UniXNU/out/sheng/macos-*/*/kernel/kernel.macho ship/ 2>/dev/null || true
-          cp UniXNU/out/sheng/macos-*/*/runtime/data.dbr ship/ 2>/dev/null || true
-          cp UniXNU/out/sheng/macos-*/*/package.manifest.json ship/ 2>/dev/null || true
+          # 关键：boot.img/kernel.macho/data.dbr 是稀疏文件，macOS 26 runner 的 cp 会
+          # 只复制出实际分配的稀疏占位（4MB 全零）而非完整内容。改用 cat 逐字节复制
+          # （读满 st_size），并用 sha256 校验确保副本与源一致。
+          copy_check() {
+            src="$1"; dst="ship/$2"
+            echo "--- copy $2 ---"
+            ls -l "$src"
+            cat "$src" > "$dst"
+            ss=$(shasum -a 256 "$src" | awk '{print $1}')
+            ds=$(shasum -a 256 "$dst" | awk '{print $1}')
+            echo "  src $ss ($(stat -f%z "$src") bytes)"
+            echo "  dst $ds ($(stat -f%z "$dst") bytes)"
+            [ "$ss" = "$ds" ] || { echo "::error::sha256 mismatch for $2"; exit 1; }
+          }
+          copy_check "$outdir/boot/boot.img" boot.img
+          copy_check "$outdir/payload/payload.img" payload.img
+          copy_check "$outdir/kernel/kernel.macho" kernel.macho
+          copy_check "$outdir/runtime/data.dbr" data.dbr
+          cat "$outdir/package.manifest.json" > ship/package.manifest.json
+          cat "$(dirname "$img")/userdata-root.json" > ship/userdata-root.json
           ls -l ship
 
       - name: publish release
