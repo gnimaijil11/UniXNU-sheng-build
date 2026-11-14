@@ -35,8 +35,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TRANSFER_HOST: gnima@100.64.0.4
-  TRANSFER_DIR: C:/Users/gnima/unixnu-images
+  TRANSFER_HOST: gnima@100.64.0.6
+  TRANSFER_DIR: D:/unixnu-images
   # prepare-xnu-source.py (and other unixnu fetch helpers) hit api.github.com anonymously
   # unless a token is present; hosted macOS runners share an IP whose anonymous quota
   # is exhausted by other tenants (HTTP 403 rate limit exceeded). Pass the workflow token.
