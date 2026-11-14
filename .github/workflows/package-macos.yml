@@ -28,15 +28,13 @@ on:
         default: true
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: package-macos-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  TRANSFER_HOST: gnima@100.64.0.6
-  TRANSFER_DIR: D:/unixnu-images
   # prepare-xnu-source.py (and other unixnu fetch helpers) hit api.github.com anonymously
   # unless a token is present; hosted macOS runners share an IP whose anonymous quota
   # is exhausted by other tenants (HTTP 403 rate limit exceeded). Pass the workflow token.
@@ -65,7 +63,7 @@ jobs:
 
       - name: tools
         run: |
-          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
+          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd
           {
             echo "$HOME/.cargo/bin"
             echo "/opt/homebrew/opt/llvm/bin"
@@ -245,50 +243,34 @@ jobs:
           echo "seed: $seed"
           scripts/package.sh --os macos-27 --uefi ../uefi-sheng --data-ramdisk "$seed"
 
-      - name: pack userdata for transfer
+      - name: pack release assets (zstd + split)
         run: |
+          set -euo pipefail
           img="$(ls UniXNU/out/sheng/macos-*/*/userdata/userdata-root.img | head -1)"
           ls -l "$img"
           mkdir -p ship
-          gzip -1 -c "$img" | split -b 1900m - ship/userdata-root.img.gz.part
+          # zstd 多线程压缩：稀疏镜像压缩率远高于 gzip -1，体积更小、上传/下载更快
+          zstd -3 -T0 -c "$img" | split -b 1900m - ship/userdata-root.img.zst.part
           cp "$(dirname "$img")/userdata-root.json" ship/ 2>/dev/null || true
           cp UniXNU/out/sheng/macos-*/*/boot/boot.img ship/ 2>/dev/null || true
           cp UniXNU/out/sheng/macos-*/*/payload/payload.img ship/ 2>/dev/null || true
           cp UniXNU/out/sheng/macos-*/*/kernel/kernel.macho ship/ 2>/dev/null || true
           cp UniXNU/out/sheng/macos-*/*/runtime/data.dbr ship/ 2>/dev/null || true
+          cp UniXNU/out/sheng/macos-*/*/package.manifest.json ship/ 2>/dev/null || true
           ls -l ship
 
-      - name: join tailnet
-        if: inputs.transfer
+      - name: publish release
         env:
-          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          brew install tailscale || true
-          sudo mkdir -p /var/run/tailscale
-          sudo tailscaled --state=mem: \
-                          --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &
-          for i in $(seq 1 30); do [ -S /var/run/tailscale/tailscaled.sock ] && break; sleep 1; done
-          sudo tailscale --socket=/var/run/tailscale/tailscaled.sock up \
-            --login-server=https://logosvoyage.site:1143 \
-            --authkey="$TS_AUTHKEY" \
-            --hostname=gh-macos-sheng \
-            --accept-routes=false --reset
-          sudo tailscale --socket=/var/run/tailscale/tailscaled.sock status || tail -20 /tmp/tailscaled.log
-          ping -c 3 "$(echo "$TRANSFER_HOST" | cut -d@ -f2)" || true
-
-      - name: copy images to the tailnet host
-        if: inputs.transfer
-        env:
-          RUNNER_SSH_KEY: ${{ secrets.RUNNER_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$RUNNER_SSH_KEY" > ~/.ssh/id_transfer
-          chmod 600 ~/.ssh/id_transfer
-          ls -l ship
-          scp -i ~/.ssh/id_transfer -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              ship/* "$TRANSFER_HOST:$TRANSFER_DIR/"
-          ssh -i ~/.ssh/id_transfer -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              "$TRANSFER_HOST" "dir $TRANSFER_DIR"
+          set -euo pipefail
+          tag="sheng-macos-27.3-r${{ github.run_number }}"
+          gh release create "$tag" ship/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "macOS 27.3 sheng build r${{ github.run_number }}" \
+            --notes "Auto-built $(date -u +%F). Download all assets, then merge + decompress the userdata parts on the target host." \
+            --generate-notes
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY"
 
       - name: images
         if: always()
