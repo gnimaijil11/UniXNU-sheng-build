@@ -265,6 +265,7 @@ jobs:
         run: |
           brew install tailscale || true
           sudo mkdir -p /var/run/tailscale
+          sudo mkdir -p /var/lib/tailscale
           sudo tailscaled --state=/var/lib/tailscale/tailscaled.state \
                           --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &
           sleep 5
@@ -291,6 +292,7 @@ jobs:
               "$TRANSFER_HOST" "dir $TRANSFER_DIR"
 
       - name: images
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: images-macos-27
