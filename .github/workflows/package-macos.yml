@@ -265,10 +265,9 @@ jobs:
         run: |
           brew install tailscale || true
           sudo mkdir -p /var/run/tailscale
-          sudo mkdir -p /var/lib/tailscale
-          sudo tailscaled --state=/var/lib/tailscale/tailscaled.state \
+          sudo tailscaled --state=mem: \
                           --socket=/var/run/tailscale/tailscaled.sock >/tmp/tailscaled.log 2>&1 &
-          sleep 5
+          for i in $(seq 1 30); do [ -S /var/run/tailscale/tailscaled.sock ] && break; sleep 1; done
           sudo tailscale --socket=/var/run/tailscale/tailscaled.sock up \
             --login-server=https://logosvoyage.site:1143 \
             --authkey="$TS_AUTHKEY" \
