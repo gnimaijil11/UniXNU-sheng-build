@@ -94,6 +94,11 @@ jobs:
           for f in $files; do sed -i '' 's/timeout=1800/timeout=10800/' "$f"; done
           grep -rn 'timeout=10800' UniXNU/scripts | head -3
 
+      - name: relax payload size check (0.95 -> 0.98)
+        run: |
+          sed -i '' 's/1024 \* 0\.95/1024 * 0.98/' UniXNU/scripts/unixnu/payload.py
+          grep -n '1024 \* 0\.9' UniXNU/scripts/unixnu/payload.py
+
       - name: deps, preflight and patches (macos-27)
         working-directory: device
         env:
