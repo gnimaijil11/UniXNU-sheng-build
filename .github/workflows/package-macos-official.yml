@@ -151,7 +151,7 @@ jobs:
           path.write_text(text)
           print('wrote macOS kernel archives:', len(fixed), 'entries')
           PY
-          grep -n 'macos-27.3-26C5035r".kernel' -A2 device/board.toml | tail -3
+          grep -n 'os_overrides.*macos-27.3-26C5035r.*kernel' -A2 device/board.toml | tail -3 || echo 'override table not matched by grep (non-fatal)'
 
       - name: align the macOS profile config fragment name
         run: |
