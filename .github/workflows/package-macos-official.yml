@@ -268,51 +268,26 @@ jobs:
 
       - name: stage the WCN7850 firmware
         run: |
-          # firmware/wcn7850/manifest.json pins each blob's sha256 and size, and normally
-          # also the upstream source (repository/revision/directory). Some device revisions
-          # dropped those three keys, so treat them as optional and fall back to the
-          # linux-firmware pin recorded in the porting notes. Never rewrite the manifest.
-          # Stage the blobs where the build reads them: device/.cache/firmware/wcn7850.
+          # firmware/wcn7850/manifest.json ships in the device repo and pins the upstream source
+          # (repository/revision/directory) plus each file's sha256 and size. Never rewrite it:
+          # build-wifi-userspace.py reads those keys, and the blobs must match the pinned hashes.
+          # Stage them where the build reads them: device/.cache/firmware/wcn7850.
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib, json, pathlib, urllib.parse, urllib.request
+          import hashlib, json, pathlib, urllib.request
           root = pathlib.Path('device')
           manifest = json.loads((root / 'firmware/wcn7850/manifest.json').read_text())
           dest = root / '.cache/firmware/wcn7850'
           dest.mkdir(parents=True, exist_ok=True)
-
-          DEFAULT_SOURCE = {
-              'repository': 'https://gitlab.com/kernel-firmware/linux-firmware',
-              'revision': 'a4ce85e98a33fa1021c31d1887fc2dffed27e8dd',
-              'directory': 'ath12k/WCN7850/hw2.0',
-          }
-          missing = [key for key in DEFAULT_SOURCE if key not in manifest]
-          if missing:
-              print('manifest lacks %s; falling back to the pinned linux-firmware source' % ', '.join(missing))
-          repository = manifest.get('repository', DEFAULT_SOURCE['repository']).rstrip('/')
-          revision = manifest.get('revision', DEFAULT_SOURCE['revision'])
-          directory = manifest.get('directory', DEFAULT_SOURCE['directory']).strip('/')
-          path_part = repository.split('://', 1)[-1]
-          path_part = path_part.split('/', 1)[1] if '/' in path_part else path_part
-          project = urllib.parse.quote(path_part.strip('/'), safe='')
-
-          def candidates(name):
-              """Download URLs to try, in order: manifest source, GitLab API, kernel.org mirror."""
-              urls = [
-                  repository + '/-/raw/' + revision + '/' + directory + '/' + name,
-                  'https://gitlab.com/api/v4/projects/' + project
-                  + '/repository/files/' + urllib.parse.quote(directory + '/' + name, safe='')
-                  + '/raw?ref=' + revision,
-                  'https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/'
-                  + directory + '/' + name + '?id=' + revision,
-              ]
-              seen, ordered = set(), []
-              for url in urls:
-                  if url not in seen:
-                      seen.add(url)
-                      ordered.append(url)
-              return ordered
-
+          # Older device revisions ship only {files, provenance}: no pinned repository. Fall back
+          # to the upstream revision the newer manifest pins, so both schemas stage identical bytes.
+          repository = manifest.get('repository', 'https://gitlab.com/kernel-firmware/linux-firmware')
+          revision = manifest.get('revision', 'a4ce85e98a33fa1021c31d1887fc2dffed27e8dd')
+          directory = manifest.get('directory', 'ath12k/WCN7850/hw2.0')
+          print('source:', repository, revision, directory,
+                '(from manifest)' if manifest.get('repository') else '(defaults for the legacy manifest schema)')
+          base = (repository.rstrip('/') + '/-/raw/' + revision
+                  + '/' + directory.strip('/'))
           problems = []
           for name, meta in manifest['files'].items():
               target = dest / name
@@ -321,28 +296,24 @@ jobs:
                   if len(data) == meta['bytes'] and hashlib.sha256(data).hexdigest() == meta['sha256']:
                       print(name, 'cached', len(data))
                       continue
-              failures = []
-              for url in candidates(name):
-                  print('fetch', url)
-                  request = urllib.request.Request(url, headers={'User-Agent': 'curl/8.7.1'})
-                  try:
-                      with urllib.request.urlopen(request, timeout=180) as response:
-                          data = response.read()
-                  except Exception as error:
-                      failures.append('%s: download failed: %s' % (url, error))
-                      print(failures[-1])
-                      continue
-                  got = hashlib.sha256(data).hexdigest()
-                  if got != meta['sha256'] or len(data) != meta['bytes']:
-                      failures.append('%s: got %s (%d bytes), want %s (%d bytes)'
-                                      % (url, got, len(data), meta['sha256'], meta['bytes']))
-                      print(failures[-1])
-                      continue
-                  target.write_bytes(data)
-                  print(name, len(data), 'ok from', url)
-                  break
-              else:
-                  problems.append('%s: no usable source\n  ' % name + '\n  '.join(failures))
+              url = base + '/' + name
+              print('fetch', url)
+              request = urllib.request.Request(url, headers={'User-Agent': 'curl/8.7.1'})
+              try:
+                  with urllib.request.urlopen(request, timeout=180) as response:
+                      data = response.read()
+              except Exception as error:
+                  problems.append('%s: download failed: %s' % (name, error))
+                  print(problems[-1])
+                  continue
+              got = hashlib.sha256(data).hexdigest()
+              if got != meta['sha256'] or len(data) != meta['bytes']:
+                  problems.append('%s: got %s (%d bytes), want %s (%d bytes)'
+                                  % (name, got, len(data), meta['sha256'], meta['bytes']))
+                  print(problems[-1])
+                  continue
+              target.write_bytes(data)
+              print(name, len(data), 'ok')
           if problems:
               raise SystemExit('WCN7850 firmware staging failed:\n' + '\n'.join(problems))
           PY
