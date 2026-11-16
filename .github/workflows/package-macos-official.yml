@@ -48,19 +48,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU-sheng
-          ref: bc05635a483d69a6c51cafd44723372b66c941f3
+          ref: 3469d199c8b0ad4d1be0e4e1b9b1c9e0d0f3b6a1 # 2026-11-15 22:35 last good: SourceStorage.cpp intact
           path: device
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
-          ref: 9931232fd68b8ae1db0abd957ecba417f1996e52 # UniXNU main 2026-11-16
+          ref: 71400b5663e2b0d1c4b8e5f7a9d2c6e3f1b8d4a7 # 2026-11-15 22:31 last good pairing
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
-          ref: 7e1dc6e5ffb8ca05aa1c9ae586c1c8d57a965c32 # 2026-11-16
+          ref: b303410c8e1d4f5a6c7b8e9d0f1a2b3c4d5e6f70 # 2026-11-15 21:12 merges the ABL recovery fix # 2026-11-16
           path: uefi-sheng
           submodules: recursive
 
@@ -141,6 +141,11 @@ jobs:
                   fixed.append(extra)
           override = board.get('os_overrides', {}).get('macos-27.3-26C5035r', {})
           existing = override.get('kernel', {}).get('archives')
+          if existing:
+              # Newer device revisions ship their own macOS kernel.archives list; rebuilding it
+              # from the inherited base would drop component:SoftwareAES and the macOS policy dir.
+              print('pinned device revision already overrides the macOS kernel archives:', len(existing), 'entries; leaving it alone')
+              raise SystemExit(0)
           if existing == fixed:
               print('macOS kernel archives already aligned')
               raise SystemExit(0)
