@@ -173,6 +173,61 @@ jobs:
             echo "copied macos.config -> ipados.config"
           fi
 
+      - name: fit the macOS payload inside the qualified boot image
+        run: |
+          # board.toml at the pinned device revision asks for a 200 MiB macOS payload volume while
+          # the same file caps the boot image at 202375168 B (193 MiB), so pack stops with
+          # "boot image is 210907136 bytes, exceeding the qualified limit 202375168".
+          # Device revision 60566370 keeps the cap and drops the macOS payload to 187 MiB, so the
+          # cap is the real boot-partition bound: shrink the volume instead of raising the limit.
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, re, sys
+          path = pathlib.Path('device/board.toml')
+          text = path.read_text()
+          base = '["os_overrides"."macos-27.3-26C5035r".'
+
+          def table_block(header):
+              start = text.find(header + '\n')
+              if start < 0:
+                  return None
+              end = len(text)
+              for m in re.finditer(r'^\[', text[start + len(header):], re.M):
+                  end = start + len(header) + m.start()
+                  break
+              return start, end
+
+          limit = None
+          block = table_block(base + '"bootimg"]')
+          if block:
+              m = re.search(r'^"max_image_bytes"\s*=\s*(\d+)', text[block[0]:block[1]], re.M)
+              if m:
+                  limit = int(m.group(1))
+          if not limit:
+              print('no macOS bootimg max_image_bytes in the pinned board.toml; nothing to fit')
+              raise SystemExit(0)
+          reserve = 2 << 20  # boot header, loader and dtb overhead (~1.14 MiB observed)
+          cap = (limit - reserve) >> 20
+
+          block = table_block(base + '"payload"]')
+          if not block:
+              print('no macOS payload table; leaving the inherited size alone')
+              raise SystemExit(0)
+          body = text[block[0]:block[1]]
+          m = re.search(r'^"size_mib"\s*=\s*(\d+)', body, re.M)
+          if not m:
+              print('macOS payload table has no size_mib; leaving it alone')
+              raise SystemExit(0)
+          current = int(m.group(1))
+          if current <= cap:
+              print('macOS payload %d MiB already fits the %d MiB cap' % (current, cap))
+              raise SystemExit(0)
+          body = body[:m.start(1)] + str(cap) + body[m.end(1):]
+          path.write_text(text[:block[0]] + body + text[block[1]:])
+          print('macOS payload size_mib %d -> %d MiB (boot cap %d B)' % (current, cap, limit))
+          PY
+          grep -n 'macos-27.3-26C5035r."payload"' -A6 device/board.toml | grep -n 'size_mib' || echo '  (size_mib not shown by grep, non-fatal)'
+
       - name: deps, preflight and patches (macos-27)
         working-directory: device
         env:
