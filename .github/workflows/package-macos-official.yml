@@ -48,19 +48,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU-sheng
-          ref: 3469d199c8b0ad4d1be0e4e1b9b1c9e0d0f3b6a1 # 2026-11-15 22:35 last good: SourceStorage.cpp intact
+          ref: 3469d199c8ab2243a842c814bd9dcd1ab84a38e6 # 2026-11-15 22:35 last good: SourceStorage.cpp intact
           path: device
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
-          ref: 71400b5663e2b0d1c4b8e5f7a9d2c6e3f1b8d4a7 # 2026-11-15 22:31 last good pairing
+          ref: 71400b5663ccb793ef4cea7302d488645011dd61 # 2026-11-15 22:31 last good pairing
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
-          ref: b303410c8e1d4f5a6c7b8e9d0f1a2b3c4d5e6f70 # 2026-11-15 21:12 merges the ABL recovery fix # 2026-11-16
+          ref: b303410c8e401fc9419ae65a024356ed09a438ef # 2026-11-15 21:12 merges the ABL recovery fix
           path: uefi-sheng
           submodules: recursive
 
