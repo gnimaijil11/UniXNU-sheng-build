@@ -318,6 +318,17 @@ jobs:
               raise SystemExit('WCN7850 firmware staging failed:\n' + '\n'.join(problems))
           PY
           ls -l device/.cache/firmware/wcn7850
+          # The 2026-11-15 device revision's build-wifi-userspace.py has no --firmware argument:
+          # it reads the blobs straight from device/firmware/wcn7850 (the directory that also
+          # holds the shipped manifest.json). Mirror the verified blobs there and leave the
+          # manifest untouched; the newer device revision takes an argument and ignores these.
+          # (macOS bash 3.2: no empty-array expansion under set -u, so copy the glob directly)
+          for blob in device/.cache/firmware/wcn7850/amss.bin \
+                      device/.cache/firmware/wcn7850/m3.bin \
+                      device/.cache/firmware/wcn7850/board-2.bin; do
+            if [ -f "$blob" ]; then cp -f "$blob" device/firmware/wcn7850/; fi
+          done
+          ls -l device/firmware/wcn7850
 
       - name: patch the driver fetch scripts
         run: |
