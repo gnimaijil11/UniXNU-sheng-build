@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
-          ref: main # official workflow tracks the default branch
+          ref: 8156d2e54a9f57818dc8b415a1a7dc28ad9ba4be # pinned by the official verified macos-lab.yml
           path: uefi-sheng
           submodules: recursive
 
