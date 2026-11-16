@@ -110,6 +110,21 @@ jobs:
           grep -n '1024 \* 0\.9' "$f" || echo "  (no 0.9x payload size check present)"
           exit 0
 
+      - name: align the macOS profile config fragment name
+        run: |
+          # The device board.toml asks for os:configs/ipados.config for every profile, but the
+          # macos-27.3-26C5035r profile in UniXNU main only ships configs/macos.config, so the
+          # preflight stops with "configuration fragment missing". Supply the name it asks for
+          # from the macOS config itself; nothing else in the profile is touched.
+          d=UniXNU/profiles/os/macos-27.3-26C5035r/configs
+          ls -l "$d"
+          if [ -f "$d/ipados.config" ]; then
+            echo "already present"
+          else
+            cp "$d/macos.config" "$d/ipados.config"
+            echo "copied macos.config -> ipados.config"
+          fi
+
       - name: deps, preflight and patches (macos-27)
         working-directory: device
         env:
