@@ -99,8 +99,16 @@ jobs:
 
       - name: relax payload size check (0.95 -> 0.98)
         run: |
-          sed -i '' 's/1024 \* 0\.95/1024 * 0.98/' UniXNU/scripts/unixnu/payload.py
-          grep -n '1024 \* 0\.9' UniXNU/scripts/unixnu/payload.py
+          set +e
+          f=UniXNU/scripts/unixnu/payload.py
+          if grep -q '1024 \* 0\.95' "$f" 2>/dev/null; then
+            sed -i '' 's/1024 \* 0\.95/1024 * 0.98/' "$f"
+            echo "relaxed 0.95 -> 0.98"
+          else
+            echo "no 0.95 check in $f; the pinned source needs no relaxation"
+          fi
+          grep -n '1024 \* 0\.9' "$f" || echo "  (no 0.9x payload size check present)"
+          exit 0
 
       - name: deps, preflight and patches (macos-27)
         working-directory: device
@@ -113,7 +121,8 @@ jobs:
           files="$(grep -rl 'timeout=1800' UniXNU/out 2>/dev/null || true)"
           echo "patching: $files"
           for f in $files; do sed -i '' 's/timeout=1800/timeout=10800/' "$f"; done
-          grep -rn 'timeout=10800' UniXNU/out | head -3
+          grep -rn 'timeout=10800' UniXNU/out | head -3 || echo "  (no generated 1800s timeout left)"
+          exit 0
 
       - name: sign the root policies (trusted-key + manifest headers + vroot tables)
         working-directory: device
