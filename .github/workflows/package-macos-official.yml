@@ -220,15 +220,36 @@ jobs:
 
       - name: stage the WCN7850 firmware
         run: |
-          # firmware/wcn7850 is gitignored: maintainers keep it locally. The blobs are the
-          # ones proprietary-files.txt fetches; the manifest is generated from them.
-          mkdir -p device/firmware/wcn7850
-          base=https://raw.githubusercontent.com/ianchb/sheng-firmware/master/ath12k/WCN7850/hw2.0
-          for f in amss.bin m3.bin board-2.bin; do
-            curl -fSL --retry 3 -o "device/firmware/wcn7850/$f" "$base/$f"
-          done
-          python3 -c "import hashlib,json,pathlib; d=pathlib.Path('device/firmware/wcn7850'); files={n:{'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()} for n in ('amss.bin','m3.bin','board-2.bin') for b in [(d/n).read_bytes()]}; (d/'manifest.json').write_text(json.dumps({'files':files},indent=2)+chr(10)); print(json.dumps(files,indent=2))"
-          ls -l device/firmware/wcn7850
+          # The device repo ships firmware/wcn7850/manifest.json (repository, revision, directory,
+          # per-file sha256/bytes). Do NOT rewrite it: build-wifi-userspace.py reads its
+          # repository/revision/directory to fetch a missing blob, and the staged files must match
+          # the pinned hashes. Stage them where the build reads them: device/.cache/firmware/wcn7850.
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          root = pathlib.Path('device')
+          manifest = json.loads((root / 'firmware/wcn7850/manifest.json').read_text())
+          dest = root / '.cache/firmware/wcn7850'
+          dest.mkdir(parents=True, exist_ok=True)
+          base = (manifest['repository'].rstrip('/') + '/-/raw/' + manifest['revision']
+                  + '/' + manifest['directory'].strip('/'))
+          for name, meta in manifest['files'].items():
+              target = dest / name
+              if target.is_file():
+                  data = target.read_bytes()
+                  if hashlib.sha256(data).hexdigest() == meta['sha256']:
+                      print(name, 'cached', len(data))
+                      continue
+              url = base + '/' + name
+              print('fetch', url)
+              data = urllib.request.urlopen(url, timeout=180).read()
+              got = hashlib.sha256(data).hexdigest()
+              if got != meta['sha256'] or len(data) != meta['bytes']:
+                  raise SystemExit('%s: hash/size mismatch (%s, %d)' % (name, got, len(data)))
+              target.write_bytes(data)
+              print(name, len(data), 'ok')
+          PY
+          ls -l device/.cache/firmware/wcn7850
 
       - name: patch the driver fetch scripts
         run: |
