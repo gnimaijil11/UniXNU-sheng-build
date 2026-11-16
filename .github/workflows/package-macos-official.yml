@@ -440,8 +440,34 @@ jobs:
           outdir="$(dirname "$(dirname "$img")")"
           echo "outdir: $outdir"
           mkdir -p ship
-          # zstd 多线程压缩：稀疏镜像压缩率远高于 gzip -1，体积更小、上传/下载更快
-          zstd -3 -T0 -c "$img" | split -b 1900m - ship/userdata-root.img.zst.part
+          # 打包前先腾空间：release 步骤之后 ipsw 解包镜像（OS ~11 GiB + Cryptex ~2.4 GiB）
+          # 与构建中间树都已无用，不清掉的话压缩流写到 ~10 GiB 时 runner 磁盘见底，
+          # 上一轮就在第 6 个分片上报 "split: ...: Invalid argument"。
+          du -sh UniXNU/out/ipsw "$outdir/tree/build" 2>/dev/null || true
+          rm -rf UniXNU/out/ipsw "$outdir/tree/build"
+          echo "--- free space before packing ---"
+          df -h . || true
+          echo "--- compress userdata ---"
+          zstd -3 -T0 -f -o ship/userdata-root.img.zst "$img"
+          size=$(stat -f%z ship/userdata-root.img.zst)
+          echo "userdata-root.img.zst: $size bytes"
+          chunk=$((1900 * 1000 * 1000))
+          if [ "$size" -le "$chunk" ]; then
+            echo "== single part ($size <= $chunk bytes), no split needed"
+          else
+            parts=$(( (size + chunk - 1) / chunk ))
+            echo "== splitting into $parts parts of $chunk bytes (GitHub asset cap 2 GiB)"
+            i=0
+            while [ "$i" -lt "$parts" ]; do
+              suffix=$(printf '%02x' "$i")
+              dd if=ship/userdata-root.img.zst of="ship/userdata-root.img.zst.part$suffix" \
+                 bs=1000000 skip=$((i * 1900)) count=1900 2>/dev/null
+              echo "  part$suffix $(stat -f%z "ship/userdata-root.img.zst.part$suffix") bytes"
+              i=$((i + 1))
+            done
+            rm -f ship/userdata-root.img.zst
+          fi
+          df -h . || true
           # 关键：boot.img/kernel.macho/data.dbr 是稀疏文件，macOS 26 runner 的 cp 会
           # 只复制出实际分配的稀疏占位（4MB 全零）而非完整内容。改用 cat 逐字节复制
           # （读满 st_size），并用 sha256 校验确保副本与源一致。
@@ -463,7 +489,6 @@ jobs:
           cat "$outdir/package.manifest.json" > ship/package.manifest.json
           cat "$(dirname "$img")/userdata-root.json" > ship/userdata-root.json
           ls -l ship
-
       - name: publish release
         env:
           GH_TOKEN: ${{ github.token }}
