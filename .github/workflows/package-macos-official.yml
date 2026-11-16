@@ -110,6 +110,49 @@ jobs:
           grep -n '1024 \* 0\.9' "$f" || echo "  (no 0.9x payload size check present)"
           exit 0
 
+      - name: align the macOS kernel archives with the runtime integration
+        run: |
+          # device/board.toml lists the archives the kernel stage must produce. The
+          # 2026-11-16 "integrate sheng runtime" commit added the SoftwareAES component to
+          # the macOS override's components.include and to iPadOS's archives, but left the
+          # inherited ["kernel"].archives stale: it has no component:SoftwareAES, and its
+          # build-sheng-source-storage.py still passes the iPadOS policy directory. The
+          # kernel stage then fails with "archives needs component entries for: SoftwareAES"
+          # and undefined _native_* / _sheng_boot_watchdog_policy symbols.
+          # Give the macOS override its own archives list: the inherited entries with those
+          # two corrections, plus the runtime binding generators iPadOS already runs.
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, re, tomllib
+          path = pathlib.Path('device/board.toml')
+          text = path.read_text()
+          board = tomllib.loads(text)
+          base = list(board['kernel']['archives'])
+          fixed = []
+          for entry in base:
+              if entry.startswith('build-sheng-source-storage.py'):
+                  fixed.append('build-sheng-source-storage.py --policy-dir scripts/policies/macos-27.3-26C5035r')
+              else:
+                  fixed.append(entry)
+          for extra in ('component:SoftwareAES', 'build-software-aes-bindings.py',
+                        'build-virtio-mmio-bindings.py --component RamBlock --directory build/ram-block',
+                        'build-sheng-platform-power.py', 'build-boot-progress.py'):
+              if extra not in fixed:
+                  fixed.append(extra)
+          override = board.get('os_overrides', {}).get('macos-27.3-26C5035r', {})
+          existing = override.get('kernel', {}).get('archives')
+          if existing == fixed:
+              print('macOS kernel archives already aligned')
+              raise SystemExit(0)
+          quoted = ', '.join('"%s"' % item for item in fixed)
+          block = ('\n["os_overrides"."macos-27.3-26C5035r"."kernel"]\n'
+                   '"archives" = [%s]\n' % quoted)
+          text = text.rstrip('\n') + '\n' + block
+          path.write_text(text)
+          print('wrote macOS kernel archives:', len(fixed), 'entries')
+          PY
+          grep -n 'macos-27.3-26C5035r".kernel' -A2 device/board.toml | tail -3
+
       - name: align the macOS profile config fragment name
         run: |
           # The device board.toml asks for os:configs/ipados.config for every profile, but the
