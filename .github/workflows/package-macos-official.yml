@@ -48,19 +48,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU-sheng
-          ref: 3469d199c8ab2243a842c814bd9dcd1ab84a38e6 # 2026-11-15 22:35 last good: SourceStorage.cpp intact
+          ref: 206171054cd9d5f18767dccc43524cd7ba568001 # HEAD: rewritten dts/sheng.dts declares memory + splash
           path: device
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
-          ref: 71400b5663ccb793ef4cea7302d488645011dd61 # 2026-11-15 22:31 last good pairing
+          ref: 630b85a307f19c8d8a4699d5bfc12f6796b874aa # UniXNU main HEAD (author's macos-lab pairing)
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
-          ref: b303410c8e401fc9419ae65a024356ed09a438ef # 2026-11-15 21:12 merges the ABL recovery fix
+          ref: 8156d2e54a9f57818dc8b415a1a7dc28ad9ba4be # author macos-lab.yml uefi pin
           path: uefi-sheng
           submodules: recursive
       # This repository's own helper scripts (apply-stock-dtb.py, patch-xnuprelink-layout.py).
@@ -71,221 +71,6 @@ jobs:
           path: build-repo
           sparse-checkout: scripts
           persist-credentials: false
-
-      - name: tools
-        run: |
-          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw zstd
-          {
-            echo "$HOME/.cargo/bin"
-            echo "/opt/homebrew/opt/llvm/bin"
-            echo "/opt/homebrew/opt/lld/bin"
-            echo "/opt/homebrew/opt/bison/bin"
-          } >> "$GITHUB_PATH"
-          rustup toolchain install 1.98.0 --profile minimal --component rust-src
-          ok=1
-          for t in clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool \
-                   hdiutil diskutil ditto mformat mcopy ipsw; do
-            command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
-          done
-          [ "$ok" = 1 ]
-
-      # The kernel stage runs a bootstrap compile pass BEFORE it generates the archives, so a
-      # cold build links with _native_* / _sheng_boot_watchdog_policy undefined and dies. The
-      # lab workflow avoids this only because its xnu-work cache carries the previous run's
-      # archives. Reuse the kernel cache the lab run produced (same kXR paths, same profile).
-      - name: Restore the kernel compile records
-        id: xnu-cache
-        uses: actions/cache/restore@v4
-        with:
-          key: sheng-macos27-kernel-v1-d509f7e4757a27f5-${{ github.run_id }}
-          restore-keys: sheng-macos27-kernel-v1-d509f7e4757a27f5-
-          path: |
-            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/xnu-inputs.json
-            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
-            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
-            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
-
-      - name: platform seed
-        env:
-          seed: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
-        run: |
-          if ! [[ "$seed" =~ ^[0-9a-fA-F]{8}$ ]]; then
-            echo 'Set the repository secret UNIXNU_UNIQUE_CHIP_ID: 8 hex digits.' >&2
-            exit 1
-          fi
-
-      - name: raise build timeouts in the sources
-        run: |
-          files="$(grep -rl 'timeout=1800' UniXNU/scripts 2>/dev/null || true)"
-          echo "patching sources: $files"
-          for f in $files; do sed -i '' 's/timeout=1800/timeout=10800/' "$f"; done
-          grep -rn 'timeout=10800' UniXNU/scripts | head -3
-
-      - name: relax payload size check (0.95 -> 0.98)
-        run: |
-          set +e
-          f=UniXNU/scripts/unixnu/payload.py
-          if grep -q '1024 \* 0\.95' "$f" 2>/dev/null; then
-            sed -i '' 's/1024 \* 0\.95/1024 * 0.98/' "$f"
-            echo "relaxed 0.95 -> 0.98"
-          else
-            echo "no 0.95 check in $f; the pinned source needs no relaxation"
-          fi
-          grep -n '1024 \* 0\.9' "$f" || echo "  (no 0.9x payload size check present)"
-          exit 0
-
-      - name: align the macOS kernel archives with the runtime integration
-        run: |
-          # device/board.toml lists the archives the kernel stage must produce. The
-          # 2026-11-16 "integrate sheng runtime" commit added the SoftwareAES component to
-          # the macOS override's components.include and to iPadOS's archives, but left the
-          # inherited ["kernel"].archives stale: it has no component:SoftwareAES, and its
-          # build-sheng-source-storage.py still passes the iPadOS policy directory. The
-          # kernel stage then fails with "archives needs component entries for: SoftwareAES"
-          # and undefined _native_* / _sheng_boot_watchdog_policy symbols.
-          # Give the macOS override its own archives list: the inherited entries with those
-          # two corrections, plus the runtime binding generators iPadOS already runs.
-          set -euo pipefail
-          python3 - <<'PY'
-          import pathlib, re, tomllib
-          path = pathlib.Path('device/board.toml')
-          text = path.read_text()
-          board = tomllib.loads(text)
-          base = list(board['kernel']['archives'])
-          fixed = []
-          for entry in base:
-              if entry.startswith('build-sheng-source-storage.py'):
-                  fixed.append('build-sheng-source-storage.py --policy-dir scripts/policies/macos-27.3-26C5035r')
-              else:
-                  fixed.append(entry)
-          for extra in ('component:SoftwareAES', 'build-software-aes-bindings.py',
-                        'build-virtio-mmio-bindings.py --component RamBlock --directory build/ram-block',
-                        'build-sheng-platform-power.py', 'build-boot-progress.py'):
-              if extra not in fixed:
-                  fixed.append(extra)
-          override = board.get('os_overrides', {}).get('macos-27.3-26C5035r', {})
-          existing = override.get('kernel', {}).get('archives')
-          if existing:
-              # The pinned revision ships its own macOS kernel.archives list. Rebuilding it from
-              # the inherited base would drop macOS-only entries (gop-legacy-display-27, the
-              # fileset helpers), so merge the missing runtime entries into the existing list
-              # instead. Without this the link fails on _native_ram_block_volume_seed
-              # (virtio-mmio RamBlock bindings) and _sheng_boot_watchdog_policy (platform power).
-              merged = []
-              for entry in existing:
-                  if entry.startswith('build-sheng-source-storage.py'):
-                      merged.append('build-sheng-source-storage.py --policy-dir scripts/policies/macos-27.3-26C5035r')
-                  else:
-                      merged.append(entry)
-              # Do not append extra generators here. The macOS override already lists everything
-              # the kernel needs; adding build-virtio-mmio-bindings on its own failed with
-              # FileNotFoundError build/storage-abi/interface-audit.json, which the source-storage
-              # stage writes and the archive order does not guarantee at that point.
-              if merged == existing:
-                  print('macOS kernel archives already aligned:', len(existing), 'entries')
-                  raise SystemExit(0)
-              quoted = ', '.join('"%s"' % item for item in merged)
-              marker = '["os_overrides"."macos-27.3-26C5035r"."kernel"]'
-              at = text.index(marker)
-              head, tail = text[:at], text[at:]
-              new_tail = re.sub(r'"archives"\s*=\s*\[[^\]]*\]', '"archives" = [%s]' % quoted, tail, count=1)
-              if new_tail == tail:
-                  raise SystemExit('could not rewrite the macOS kernel.archives line')
-              path.write_text(head + new_tail)
-              print('updated macOS kernel archives: %d -> %d entries' % (len(existing), len(merged)))
-              raise SystemExit(0)
-          if existing == fixed:
-              print('macOS kernel archives already aligned')
-              raise SystemExit(0)
-          quoted = ', '.join('"%s"' % item for item in fixed)
-          block = ('\n["os_overrides"."macos-27.3-26C5035r"."kernel"]\n'
-                   '"archives" = [%s]\n' % quoted)
-          text = text.rstrip('\n') + '\n' + block
-          path.write_text(text)
-          print('wrote macOS kernel archives:', len(fixed), 'entries')
-          PY
-          grep -n 'os_overrides.*macos-27.3-26C5035r.*kernel' -A2 device/board.toml | tail -3 || echo 'override table not matched by grep (non-fatal)'
-
-      - name: align the macOS profile config fragment name
-        run: |
-          # The device board.toml asks for os:configs/ipados.config for every profile, but the
-          # macos-27.3-26C5035r profile in UniXNU main only ships configs/macos.config, so the
-          # preflight stops with "configuration fragment missing". Supply the name it asks for
-          # from the macOS config itself; nothing else in the profile is touched.
-          d=UniXNU/profiles/os/macos-27.3-26C5035r/configs
-          ls -l "$d"
-          if [ -f "$d/ipados.config" ]; then
-            echo "already present"
-          else
-            cp "$d/macos.config" "$d/ipados.config"
-            echo "copied macos.config -> ipados.config"
-          fi
-
-      - name: fit the macOS payload inside the qualified boot image
-        run: |
-          # board.toml at the pinned device revision asks for a 200 MiB macOS payload volume while
-          # the same file caps the boot image at 202375168 B (193 MiB), so pack stops with
-          # "boot image is 210907136 bytes, exceeding the qualified limit 202375168".
-          # Device revision 60566370 keeps the cap and drops the macOS payload to 187 MiB, so the
-          # cap is the real boot-partition bound: shrink the volume instead of raising the limit.
-          set -euo pipefail
-          python3 - <<'PY'
-          import pathlib, re, sys
-          path = pathlib.Path('device/board.toml')
-          text = path.read_text()
-          base = '["os_overrides"."macos-27.3-26C5035r".'
-
-          def table_block(header):
-              start = text.find(header + '\n')
-              if start < 0:
-                  return None
-              end = len(text)
-              for m in re.finditer(r'^\[', text[start + len(header):], re.M):
-                  end = start + len(header) + m.start()
-                  break
-              return start, end
-
-          limit = None
-          block = table_block(base + '"bootimg"]')
-          if block:
-              m = re.search(r'^"max_image_bytes"\s*=\s*(\d+)', text[block[0]:block[1]], re.M)
-              if m:
-                  limit = int(m.group(1))
-          if not limit:
-              print('no macOS bootimg max_image_bytes in the pinned board.toml; nothing to fit')
-              raise SystemExit(0)
-          reserve = 2 << 20  # boot header, loader and dtb overhead (~1.14 MiB observed)
-          cap = (limit - reserve) >> 20
-
-          block = table_block(base + '"payload"]')
-          if not block:
-              print('no macOS payload table; leaving the inherited size alone')
-              raise SystemExit(0)
-          body = text[block[0]:block[1]]
-          m = re.search(r'^"size_mib"\s*=\s*(\d+)', body, re.M)
-          if not m:
-              print('macOS payload table has no size_mib; leaving it alone')
-              raise SystemExit(0)
-          current = int(m.group(1))
-          if current <= cap:
-              print('macOS payload %d MiB already fits the %d MiB cap' % (current, cap))
-              raise SystemExit(0)
-          body = body[:m.start(1)] + str(cap) + body[m.end(1):]
-          path.write_text(text[:block[0]] + body + text[block[1]:])
-          print('macOS payload size_mib %d -> %d MiB (boot cap %d B)' % (current, cap, limit))
-          PY
-          grep -n 'macos-27.3-26C5035r."payload"' -A6 device/board.toml | grep -n 'size_mib' || echo '  (size_mib not shown by grep, non-fatal)'
-
-      - name: let the native __TEXT use the tail of its prelink hole
-        run: |
-          # XnuPrelink maps the native __TEXT as whole 4 KiB pages below the next retained
-          # segment; the source-storage runtime grows past that by 0x3a8 bytes (0x1db3a8 needed
-          # vs 0x1db000 of whole pages). The round-down only protects the next retained segment,
-          # and the hole already ends there, so its own sub-page tail is usable. Without this the
-          # build stops with: No room for 0x1db3a8 bytes in __PRELINK_TEXT.
-          set -euo pipefail
-          test -f UniXNU/kits/XnuPrelink/fileset_layout.py
-          python3 "$GITHUB_WORKSPACE/build-repo/scripts/patch-xnuprelink-layout.py" .
 
       - name: deps, preflight and patches (macos-27)
         working-directory: device
@@ -499,22 +284,6 @@ jobs:
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
-
-      - name: append the stock DTB collection to boot.img
-        # 官方口径：追加给 ABL 的 DTB 必须是能跑起来的那一套，不是 board.toml [bootimg] dtb
-        # 指向的 mainline 精简树（1 个 140 KB）。
-        # 实测：原厂 boot.img 是 Android v4，无 page_size、整份文件 0 个 FDT；DTB 在 dtbo 分区，
-        # 但那 57 个与原机实测能出菜单的 8 个逐个 sha256 都对不上（尺寸也不同）。所以直接用
-        # scripts/dtb-collection.bin —— 就是从能出菜单那份镜像里切出来的 8 个，3,885,131 字节。
-        working-directory: device
-        run: |
-          set -euo pipefail
-          # locate boot.img directly; the userdata product may not exist at all.
-          # This step runs with working-directory: device, so the build output is one level up.
-          boot="$(ls ../UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
-          stock="$GITHUB_WORKSPACE/build-repo/scripts/dtb-collection.bin"
-          ls -l "$boot" "$stock"
-          python3 "$GITHUB_WORKSPACE/build-repo/scripts/apply-stock-dtb.py" "$boot" "$stock"
 
       - name: pack release assets (zstd + split)
         run: |
