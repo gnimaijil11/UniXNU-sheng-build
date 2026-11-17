@@ -26,11 +26,32 @@ def parse(path):
         kernel_size, = struct.unpack_from('<I', header, 8)
         ramdisk_size, = struct.unpack_from('<I', header, 16)
         page, = struct.unpack_from('<I', header, 36)
+        if page == 0:
+            # Android boot image v3/v4: no page_size field, no page padding, and the vendor
+            # images carry their DTB in the dtbo partition instead of the boot image.
+            raise SystemExit('%s: boot image v3/v4 (header_version %d) has no page_size and '
+                             'carries no appended DTB; pass a DTB collection file instead'
+                             % (path, struct.unpack_from('<I', header, 40)[0]))
         handle.seek(page)
         kernel = handle.read(kernel_size)
         handle.seek(page + (kernel_size + page - 1) // page * page)
         ramdisk = handle.read(ramdisk_size)
     return header, kernel, ramdisk, page
+
+
+def load_stock(path):
+    """Return the DTB collection to append.
+
+    Accepts either a stock boot.img (collection follows the compressed firmware in its
+    kernel region) or a raw collection file that already starts with an FDT.
+    """
+    with open(path, 'rb') as handle:
+        magic = handle.read(4)
+    if magic == MAGIC:
+        with open(path, 'rb') as handle:
+            return handle.read()
+    _, stock_kernel, _, _ = parse(path)
+    return collection(stock_kernel)[1]
 
 
 def collection(kernel):
@@ -43,9 +64,10 @@ def collection(kernel):
 def main():
     build, stock = sys.argv[1], sys.argv[2]
     header, kernel, ramdisk, page = parse(build)
-    _, stock_kernel, _, _ = parse(stock)
-    split, replacement = collection(kernel)
-    _, received = collection(stock_kernel)
+    split, _ = collection(kernel)
+    received = load_stock(stock)
+    if received[:4] != MAGIC:
+        raise SystemExit('%s: stock input is not an FDT collection' % stock)
     new_kernel = kernel[:split] + received
     padded = (len(new_kernel) + page - 1) // page * page
     struct.pack_into('<I', header, 8, len(new_kernel))
