@@ -63,6 +63,14 @@ jobs:
           ref: b303410c8e401fc9419ae65a024356ed09a438ef # 2026-11-15 21:12 merges the ABL recovery fix
           path: uefi-sheng
           submodules: recursive
+      # This repository's own helper scripts (apply-stock-dtb.py, patch-xnuprelink-layout.py).
+      # The three checkouts above all use explicit paths, so the wrapper repository itself is
+      # never in the workspace and $GITHUB_WORKSPACE/scripts does not exist.
+      - uses: actions/checkout@v4
+        with:
+          path: build-repo
+          sparse-checkout: scripts
+          persist-credentials: false
 
       - name: tools
         run: |
@@ -262,7 +270,7 @@ jobs:
           # build stops with: No room for 0x1db3a8 bytes in __PRELINK_TEXT.
           set -euo pipefail
           test -f UniXNU/kits/XnuPrelink/fileset_layout.py
-          python3 "$GITHUB_WORKSPACE/scripts/patch-xnuprelink-layout.py" UniXNU/kits/XnuPrelink/fileset_layout.py
+          python3 "$GITHUB_WORKSPACE/build-repo/scripts/patch-xnuprelink-layout.py" UniXNU/kits/XnuPrelink/fileset_layout.py
 
       - name: deps, preflight and patches (macos-27)
         working-directory: device
@@ -476,7 +484,7 @@ jobs:
           boot="$(ls UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
           stock=".cache/firmware/sheng/porting-inputs/boot.img"
           ls -l "$boot" "$stock"
-          python3 "$GITHUB_WORKSPACE/scripts/apply-stock-dtb.py" "$boot" "$stock"
+          python3 "$GITHUB_WORKSPACE/build-repo/scripts/apply-stock-dtb.py" "$boot" "$stock"
 
       - name: pack release assets (zstd + split)
         run: |
