@@ -506,8 +506,9 @@ jobs:
         working-directory: device
         run: |
           set -euo pipefail
-          # locate boot.img directly; the userdata product may not exist at all
-          boot="$(ls UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
+          # locate boot.img directly; the userdata product may not exist at all.
+          # This step runs with working-directory: device, so the build output is one level up.
+          boot="$(ls ../UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
           stock=".cache/firmware/sheng/porting-inputs/boot.img"
           ls -l "$boot" "$stock"
           python3 "$GITHUB_WORKSPACE/build-repo/scripts/apply-stock-dtb.py" "$boot" "$stock"
