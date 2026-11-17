@@ -86,6 +86,15 @@ jobs:
           grep -rn 'timeout=10800' UniXNU/out | head -3 || echo "  (no generated 1800s timeout left)"
           exit 0
 
+      - name: defconfig + fetch macOS IPSW (cache before signing)
+        working-directory: UniXNU
+        env:
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          set -euo pipefail
+          ./unixnu defconfig sheng_macos_defconfig -D ../device --os macos-27
+          ./unixnu fetch --os macos-27
+
       - name: sign the root policies (trusted-key + manifest headers + vroot tables)
         working-directory: device
         env:
