@@ -52,6 +52,9 @@ def main():
     struct.pack_into('<I', header, 16, len(ramdisk))
     shutil.copyfile(build, build + '.mainline-dtb')
     tmp = build + '.tmp'
+    # The boot header is 1660 bytes but occupies a whole page; writing it unpadded shifts
+    # every following region by (page - 1660) bytes and fails the layout check below.
+    header += b'\0' * (page - len(header))
     with open(tmp, 'wb') as out:
         out.write(header)
         out.write(new_kernel)
