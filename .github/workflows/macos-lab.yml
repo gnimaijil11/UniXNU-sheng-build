@@ -96,7 +96,7 @@ jobs:
         # The source-storage runtime enlarges the native __TEXT past a whole-page
         # hole in __PRELINK_TEXT: the first-fit search finds a run with 0x1db000
         # usable pages for a 0x1db3a8 image. Prefer the roomiest run instead.
-        run: python3 device/scripts/patch-xnuprelink-hole.py .
+        run: python3 device/scripts/patch-xnuprelink-layout.py .
       - name: Install build tools
         run: |
           brew install dtc llvm lld llvm@22 lld@22 cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 zstd blacktop/tap/ipsw
