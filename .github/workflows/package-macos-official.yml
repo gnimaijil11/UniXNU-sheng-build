@@ -86,6 +86,27 @@ jobs:
           grep -rn 'timeout=10800' UniXNU/out | head -3 || echo "  (no generated 1800s timeout left)"
           exit 0
 
+      - name: Install build tools (llvm@22 toolchain + ipsw)
+        run: |
+          set -euo pipefail
+          brew install dtc llvm lld llvm@22 lld@22 cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 zstd blacktop/tap/ipsw
+          {
+            echo "$HOME/.cargo/bin"
+            echo "/opt/homebrew/opt/bison/bin"
+          } >> "$GITHUB_PATH"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          toolchain = Path('uefi-toolchain').resolve()
+          toolchain.mkdir(exist_ok=True)
+          for name in ('clang', 'llvm-lib', 'llvm-rc', 'lld-link'):
+              package = 'lld@22' if name == 'lld-link' else 'llvm@22'
+              (toolchain / name).symlink_to(Path('/opt/homebrew/opt') / package / 'bin' / name)
+          with Path(os.environ['GITHUB_ENV']).open('a') as output:
+              output.write('CLANG_BIN=' + str(toolchain) + '/\n')
+          PY
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+
       - name: defconfig + fetch macOS IPSW (cache before signing)
         working-directory: UniXNU
         env:
@@ -101,7 +122,6 @@ jobs:
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
         run: |
           set -euo pipefail
-          brew install openssl@3 blacktop/tap/ipsw >/dev/null 2>&1 || true
           mkdir -p build
           # 1. Decrypt and extract the three macOS windows (OS, SystemOS cryptex, App cryptex)
           #    as raw disk images, exactly as `unixnu build userdata` does internally:
