@@ -101,7 +101,7 @@ jobs:
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
         run: |
           set -euo pipefail
-          brew install openssl@3 >/dev/null 2>&1 || true
+          brew install openssl@3 blacktop/tap/ipsw >/dev/null 2>&1 || true
           mkdir -p build
           # 1. Decrypt and extract the three macOS windows (OS, SystemOS cryptex, App cryptex)
           #    as raw disk images, exactly as `unixnu build userdata` does internally:
