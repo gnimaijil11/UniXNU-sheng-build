@@ -142,9 +142,34 @@ jobs:
           override = board.get('os_overrides', {}).get('macos-27.3-26C5035r', {})
           existing = override.get('kernel', {}).get('archives')
           if existing:
-              # Newer device revisions ship their own macOS kernel.archives list; rebuilding it
-              # from the inherited base would drop component:SoftwareAES and the macOS policy dir.
-              print('pinned device revision already overrides the macOS kernel archives:', len(existing), 'entries; leaving it alone')
+              # The pinned revision ships its own macOS kernel.archives list. Rebuilding it from
+              # the inherited base would drop macOS-only entries (gop-legacy-display-27, the
+              # fileset helpers), so merge the missing runtime entries into the existing list
+              # instead. Without this the link fails on _native_ram_block_volume_seed
+              # (virtio-mmio RamBlock bindings) and _sheng_boot_watchdog_policy (platform power).
+              merged = []
+              for entry in existing:
+                  if entry.startswith('build-sheng-source-storage.py'):
+                      merged.append('build-sheng-source-storage.py --policy-dir scripts/policies/macos-27.3-26C5035r')
+                  else:
+                      merged.append(entry)
+              for extra in ('component:SoftwareAES', 'build-software-aes-bindings.py',
+                            'build-virtio-mmio-bindings.py --component RamBlock --directory build/ram-block',
+                            'build-sheng-platform-power.py', 'build-boot-progress.py'):
+                  if extra not in merged:
+                      merged.append(extra)
+              if merged == existing:
+                  print('macOS kernel archives already aligned:', len(existing), 'entries')
+                  raise SystemExit(0)
+              quoted = ', '.join('"%s"' % item for item in merged)
+              marker = '["os_overrides"."macos-27.3-26C5035r"."kernel"]'
+              at = text.index(marker)
+              head, tail = text[:at], text[at:]
+              new_tail = re.sub(r'"archives"\s*=\s*\[[^\]]*\]', '"archives" = [%s]' % quoted, tail, count=1)
+              if new_tail == tail:
+                  raise SystemExit('could not rewrite the macOS kernel.archives line')
+              path.write_text(head + new_tail)
+              print('updated macOS kernel archives: %d -> %d entries' % (len(existing), len(merged)))
               raise SystemExit(0)
           if existing == fixed:
               print('macOS kernel archives already aligned')
@@ -227,6 +252,17 @@ jobs:
           print('macOS payload size_mib %d -> %d MiB (boot cap %d B)' % (current, cap, limit))
           PY
           grep -n 'macos-27.3-26C5035r."payload"' -A6 device/board.toml | grep -n 'size_mib' || echo '  (size_mib not shown by grep, non-fatal)'
+
+      - name: let the native __TEXT use the tail of its prelink hole
+        run: |
+          # XnuPrelink maps the native __TEXT as whole 4 KiB pages below the next retained
+          # segment; the source-storage runtime grows past that by 0x3a8 bytes (0x1db3a8 needed
+          # vs 0x1db000 of whole pages). The round-down only protects the next retained segment,
+          # and the hole already ends there, so its own sub-page tail is usable. Without this the
+          # build stops with: No room for 0x1db3a8 bytes in __PRELINK_TEXT.
+          set -euo pipefail
+          test -f UniXNU/kits/XnuPrelink/fileset_layout.py
+          python3 "$GITHUB_WORKSPACE/scripts/patch-xnuprelink-layout.py" UniXNU/kits/XnuPrelink/fileset_layout.py
 
       - name: deps, preflight and patches (macos-27)
         working-directory: device
