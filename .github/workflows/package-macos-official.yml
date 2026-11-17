@@ -270,7 +270,7 @@ jobs:
           # build stops with: No room for 0x1db3a8 bytes in __PRELINK_TEXT.
           set -euo pipefail
           test -f UniXNU/kits/XnuPrelink/fileset_layout.py
-          python3 "$GITHUB_WORKSPACE/build-repo/scripts/patch-xnuprelink-layout.py" UniXNU/kits/XnuPrelink/fileset_layout.py
+          python3 "$GITHUB_WORKSPACE/build-repo/scripts/patch-xnuprelink-layout.py" .
 
       - name: deps, preflight and patches (macos-27)
         working-directory: device
