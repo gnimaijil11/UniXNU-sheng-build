@@ -146,6 +146,12 @@ jobs:
           fi
       - name: Build images
         working-directory: device
+        env:
+          # The source-storage runtime puts the root policy tables in the native
+          # __TEXT, which must fit a whole-page hole inside __PRELINK_TEXT. Two
+          # tables overflow that hole by less than one page, so carry the bring-up
+          # set only (the script documents one policy as the bring-up configuration).
+          UNIXNU_SOURCE_STORAGE_POLICIES: OS
         run: scripts/package.sh --os macos-27 --uefi ../uefi-sheng
       - name: Publish shader inventory
         if: always()
