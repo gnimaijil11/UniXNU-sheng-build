@@ -501,15 +501,18 @@ jobs:
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
 
       - name: append the stock DTB collection to boot.img
-        # 官方口径：追加给 ABL 的 DTB 必须是原厂固件的那一套（8 个 450-530 KB），
-        # 不是 board.toml [bootimg] dtb 指向的 mainline 精简树（1 个 140 KB）。
+        # 官方口径：追加给 ABL 的 DTB 必须是能跑起来的那一套，不是 board.toml [bootimg] dtb
+        # 指向的 mainline 精简树（1 个 140 KB）。
+        # 实测：原厂 boot.img 是 Android v4，无 page_size、整份文件 0 个 FDT；DTB 在 dtbo 分区，
+        # 但那 57 个与原机实测能出菜单的 8 个逐个 sha256 都对不上（尺寸也不同）。所以直接用
+        # scripts/dtb-collection.bin —— 就是从能出菜单那份镜像里切出来的 8 个，3,885,131 字节。
         working-directory: device
         run: |
           set -euo pipefail
           # locate boot.img directly; the userdata product may not exist at all.
           # This step runs with working-directory: device, so the build output is one level up.
           boot="$(ls ../UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
-          stock=".cache/firmware/sheng/porting-inputs/boot.img"
+          stock="$GITHUB_WORKSPACE/build-repo/scripts/dtb-collection.bin"
           ls -l "$boot" "$stock"
           python3 "$GITHUB_WORKSPACE/build-repo/scripts/apply-stock-dtb.py" "$boot" "$stock"
 
