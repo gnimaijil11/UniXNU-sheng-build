@@ -430,6 +430,19 @@ jobs:
           echo "seed: $seed"
           scripts/package.sh --os macos-27 --uefi ../uefi-sheng --data-ramdisk "$seed"
 
+      - name: append the stock DTB collection to boot.img
+        # 官方口径：追加给 ABL 的 DTB 必须是原厂固件的那一套（8 个 450-530 KB），
+        # 不是 board.toml [bootimg] dtb 指向的 mainline 精简树（1 个 140 KB）。
+        working-directory: device
+        run: |
+          set -euo pipefail
+          img="$(ls UniXNU/out/sheng/macos-*/*/userdata/userdata-root.img | head -1)"
+          outdir="$(dirname "$(dirname "$img")")"
+          boot="$outdir/boot/boot.img"
+          stock=".cache/firmware/sheng/porting-inputs/boot.img"
+          ls -l "$boot" "$stock"
+          python3 "$GITHUB_WORKSPACE/scripts/apply-stock-dtb.py" "$boot" "$stock"
+
       - name: pack release assets (zstd + split)
         run: |
           set -euo pipefail
