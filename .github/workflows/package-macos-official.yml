@@ -89,6 +89,22 @@ jobs:
           done
           [ "$ok" = 1 ]
 
+      # The kernel stage runs a bootstrap compile pass BEFORE it generates the archives, so a
+      # cold build links with _native_* / _sheng_boot_watchdog_policy undefined and dies. The
+      # lab workflow avoids this only because its xnu-work cache carries the previous run's
+      # archives. Reuse the kernel cache the lab run produced (same kXR paths, same profile).
+      - name: Restore the kernel compile records
+        id: xnu-cache
+        uses: actions/cache/restore@v4
+        with:
+          key: sheng-macos27-kernel-v1-d509f7e4757a27f5-${{ github.run_id }}
+          restore-keys: sheng-macos27-kernel-v1-d509f7e4757a27f5-
+          path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/xnu-inputs.json
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
+
       - name: platform seed
         env:
           seed: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
@@ -161,11 +177,10 @@ jobs:
                       merged.append('build-sheng-source-storage.py --policy-dir scripts/policies/macos-27.3-26C5035r')
                   else:
                       merged.append(entry)
-              for extra in ('component:SoftwareAES', 'build-software-aes-bindings.py',
-                            'build-virtio-mmio-bindings.py --component RamBlock --directory build/ram-block',
-                            'build-sheng-platform-power.py', 'build-boot-progress.py'):
-                  if extra not in merged:
-                      merged.append(extra)
+              # Do not append extra generators here. The macOS override already lists everything
+              # the kernel needs; adding build-virtio-mmio-bindings on its own failed with
+              # FileNotFoundError build/storage-abi/interface-audit.json, which the source-storage
+              # stage writes and the archive order does not guarantee at that point.
               if merged == existing:
                   print('macOS kernel archives already aligned:', len(existing), 'entries')
                   raise SystemExit(0)
@@ -473,6 +488,17 @@ jobs:
           seed="$(ls "$(pwd)/../UniXNU"/out/sheng/macos-*/*/runtime/data.dbr | head -1)"
           echo "seed: $seed"
           scripts/package.sh --os macos-27 --uefi ../uefi-sheng --data-ramdisk "$seed"
+
+      - name: Save the kernel compile records
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          key: sheng-macos27-kernel-v1-d509f7e4757a27f5-${{ github.run_id }}
+          path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/xnu-inputs.json
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
 
       - name: append the stock DTB collection to boot.img
         # 官方口径：追加给 ABL 的 DTB 必须是原厂固件的那一套（8 个 450-530 KB），
