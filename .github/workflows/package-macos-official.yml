@@ -436,9 +436,8 @@ jobs:
         working-directory: device
         run: |
           set -euo pipefail
-          img="$(ls UniXNU/out/sheng/macos-*/*/userdata/userdata-root.img | head -1)"
-          outdir="$(dirname "$(dirname "$img")")"
-          boot="$outdir/boot/boot.img"
+          # locate boot.img directly; the userdata product may not exist at all
+          boot="$(ls UniXNU/out/sheng/macos-*/*/boot/boot.img | head -1)"
           stock=".cache/firmware/sheng/porting-inputs/boot.img"
           ls -l "$boot" "$stock"
           python3 "$GITHUB_WORKSPACE/scripts/apply-stock-dtb.py" "$boot" "$stock"
