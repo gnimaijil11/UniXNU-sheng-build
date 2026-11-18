@@ -223,6 +223,39 @@ jobs:
                   t.extractall(deps)
           print('ath12k locked sources provisioned; upstream --check will verify')
           PY
+      - name: keyboard MCU firmware provision
+        run: |
+          python3 - <<'PY'
+          # archive-19 (build-gop-legacy-display-27.py) embeds the keyboard cover's
+          # Nanosic MCU RAM image and only reads device/.cache/firmware/nanosic/.
+          # The author keeps that blob local (like WCN7850); firmware/nanosic/ in
+          # this repository holds the exact image pinned by proprietary-files.txt
+          # (@fetch mirror commit 2c1e2729, sha256 verified). Idempotent: an already
+          # correct cache is left alone; the author's extract-files.py is the fallback.
+          import hashlib, shutil, subprocess
+          from pathlib import Path
+          root = Path('device')
+          name = 'nanosic/MCU_Upgrade.bin'
+          pin = next(line.strip().split('|')[1]
+                     for line in (root / 'proprietary-files.txt').read_text().splitlines()
+                     if line.strip().startswith(name + '|'))
+          dst = root / '.cache/firmware' / name
+          if dst.is_file() and hashlib.sha256(dst.read_bytes()).hexdigest() == pin:
+              print('keyboard firmware already cached')
+          else:
+              src = root / 'firmware' / name
+              if src.is_file() and hashlib.sha256(src.read_bytes()).hexdigest() == pin:
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(src, dst)
+                  print('keyboard firmware provisioned from repository copy')
+              else:
+                  subprocess.run(['python3', 'scripts/extract-files.py', '--section', 'Keyboard'],
+                                 cwd=root, check=True)
+          data = dst.read_bytes()
+          if hashlib.sha256(data).hexdigest() != pin:
+              raise SystemExit('keyboard firmware hash mismatch')
+          print(f'keyboard firmware ready: {len(data)} bytes, sha256 verified')
+          PY
       - name: package
         working-directory: device
         env:
