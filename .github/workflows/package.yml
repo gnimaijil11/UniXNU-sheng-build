@@ -256,6 +256,34 @@ jobs:
               raise SystemExit('keyboard firmware hash mismatch')
           print(f'keyboard firmware ready: {len(data)} bytes, sha256 verified')
           PY
+      - name: reference kernel cache-input stub fix
+        run: |
+          python3 - <<'PY'
+          # archive-20 (build-fileset-release-reference.py) links a RELEASE comparison
+          # kernel without the device source-storage archive; bring-up hooks declared
+          # weak_import in the kernel core fail the arm64e link via authenticated
+          # pointers unless stubbed. Pin 82b847c4's stub regex predates the
+          # boot_cache_input_capture hook (sheng-cache-input-diagnostic.patch), so the
+          # second link dies on it (run #8). Upstream fixed this in 84a1fe949d, present
+          # in the community-verified 97437dcf pin; widen the regex identically here
+          # without moving the pin. Idempotent; also repairs any materialized tree copy.
+          from pathlib import Path
+          old = 'native_[a-z0-9_]+|boot_log_rounds'
+          new = 'native_[a-z0-9_]+|boot_log_[a-z0-9_]+|boot_cache_input_capture'
+          targets = [Path('UniXNU/scripts/build-fileset-release-reference.py')]
+          targets += sorted(Path('UniXNU/out').glob('*/*/tree/scripts/build-fileset-release-reference.py'))
+          for p in targets:
+              if not p.is_file():
+                  continue
+              text = p.read_text()
+              if 'boot_cache_input_capture' in text:
+                  print('already widened:', p)
+              elif old in text:
+                  p.write_text(text.replace(old, new))
+                  print('widened stub regex:', p)
+              else:
+                  print('PATTERN ABSENT (upstream script changed?):', p)
+          PY
       - name: package
         working-directory: device
         env:
@@ -269,6 +297,20 @@ jobs:
             args+=(--init-data)
           fi
           scripts/package.sh "${args[@]}"
+      - name: build failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-${{ inputs.os }}
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            UniXNU/out/sheng/*/*/logs/*.log
+            UniXNU/out/sheng/*/*/tree/build/xnu/fileset-reference/*/*.log
+            UniXNU/out/sheng/*/*/tree/build/xnu/fileset-reference/*/inputs.json
+            UniXNU/out/sheng/*/*/tree/build/xnu/fileset-reference/*/*-command.json
+            UniXNU/out/sheng/*/*/tree/build/xnu/fileset-reference/*/omitted-unavailable-forced-exports.json
+            UniXNU/out/sheng/*/*/tree/build/xnu/fileset-reference/*/native-stubs.c
       - uses: actions/cache/save@v4
         if: always() && inputs.os == '27' && steps.data-cache.outputs.cache-hit != 'true' && hashFiles('UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/runtime/data.dbr') != ''
         with:
