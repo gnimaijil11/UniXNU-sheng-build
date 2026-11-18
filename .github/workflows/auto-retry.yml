@@ -1,0 +1,25 @@
+name: auto-retry
+
+# Rerun failed jobs of the iPadOS "package" workflow ONCE to ride out transient
+# runner/network failures. Deterministic failures are handled by the sheng-ci-follow
+# cron (find error -> minimal fix -> fresh dispatch). run_attempt < 2 caps this at
+# one automatic rerun per dispatch; a rerun that fails again reaches attempt 2 and
+# this workflow stays quiet.
+
+on:
+  workflow_run:
+    workflows: ["package"]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  retry:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rerun failed jobs once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run rerun "${{ github.event.workflow_run.id }}" --failed --repo "${{ github.repository }}"
