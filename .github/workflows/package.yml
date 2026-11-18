@@ -122,6 +122,32 @@ jobs:
           if not path.is_file() and os.environ['INIT_DATA'] != 'true':
               raise SystemExit('No saved seed. Supply the ORIGINAL seed for an existing installation, or select init_data for a FIRST installation')
           PY
+      - name: mesa new-file patch header fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('UniXNU/patches/mesa')
+          fixed = 0
+          for p in sorted(root.glob('*.patch')):
+              lines = p.read_text().splitlines(keepends=True)
+              out, changed = [], False
+              for i, line in enumerate(lines):
+                  out.append(line)
+                  if line.startswith('diff --git'):
+                      j, hasmode = i + 1, False
+                      while j < len(lines) and not lines[j].startswith('--- '):
+                          if lines[j].startswith('new file mode'):
+                              hasmode = True
+                          j += 1
+                      if j < len(lines) and lines[j].startswith('--- /dev/null') and not hasmode:
+                          out.append('new file mode 100644\n')
+                          changed = True
+              if changed:
+                  p.write_text(''.join(out))
+                  fixed += 1
+                  print('fixed new-file header:', p.name)
+          print(f'{fixed} mesa patch(es) fixed (cold-build git apply dev/null workaround)')
+          PY
       - name: package
         working-directory: device
         env:
