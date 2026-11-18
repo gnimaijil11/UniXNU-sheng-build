@@ -148,50 +148,81 @@ jobs:
                   print('fixed new-file header:', p.name)
           print(f'{fixed} mesa patch(es) fixed (cold-build git apply dev/null workaround)')
           PY
-      - name: driver sources
-        working-directory: device
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: ath12k locked wifi sources provision
         run: |
           python3 - <<'PY'
-          import json, os, pathlib, urllib.request
-          # git 2.5x rejects leading-slash patterns in cone-mode sparse-checkout add;
-          # fetch-sources.py computes stripped paths but still passes the raw ones.
-          old = '"sparse-checkout", "add", *source["paths"]'
-          new = '"sparse-checkout", "add", *paths'
-          for f in sorted(pathlib.Path('drivers').glob('*/tools/fetch-sources.py')):
-              s = f.read_text()
-              if old in s:
-                  f.write_text(s.replace(old, new))
-                  print('fixed sparse-checkout paths:', f)
-              else:
-                  print('sparse-checkout pattern absent (already fixed or changed):', f)
-          # freebsd releng/15.1 is a branch: its HEAD drifts past the locked commit.
-          lock_path = pathlib.Path('drivers/Ath12kWifi/tools/source-lock.json')
-          if lock_path.is_file():
-              try:
-                  req = urllib.request.Request(
-                      'https://api.github.com/repos/freebsd/freebsd-src/commits/releng/15.1',
-                      headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'],
-                               'User-Agent': 'unixnu-ci'})
-                  head = json.load(urllib.request.urlopen(req, timeout=60))['sha']
-                  lock = json.loads(lock_path.read_text())
-                  old_commit = lock['freebsd']['commit']
-                  if old_commit != head:
-                      lock['freebsd']['commit'] = head
-                      lock_path.write_text(json.dumps(lock, indent=2) + '\n')
-                      print(f'freebsd re-pinned {old_commit[:12]} -> {head[:12]}')
-                  else:
-                      print('freebsd lock already at releng/15.1 HEAD')
-              except Exception as e:
-                  print('WARNING: freebsd HEAD query failed, keeping locked commit:', e)
+          # Cold-build CI has no local deps/ for Ath12kWifi (the author keeps them
+          # local, like the WCN7850 firmware blobs); fetch-sources.py --check only
+          # verifies and exits "missing source". Provision the exact locked sources
+          # here; the upstream --check then validates revisions, required files and
+          # SHA-256 unchanged. Fetch by locked commit (freebsd releng/15.1 is a
+          # moving branch, cloning the ref lands on the wrong revision) with
+          # non-cone sparse patterns (cone mode cannot express the single-file
+          # paths in source-lock.json). Bounded retries with a mirror fallback.
+          import hashlib, json, shutil, subprocess, sys, tarfile, urllib.request
+          from pathlib import Path
+          root = Path('device/drivers/Ath12kWifi')
+          lock = json.loads((root / 'tools/source-lock.json').read_text())
+          deps = root / 'deps'
+          deps.mkdir(exist_ok=True)
+          def run(*a):
+              subprocess.run(list(a), check=True)
+          for name in ('linux', 'freebsd'):
+              s = lock[name]
+              d = deps / name
+              if d.exists():
+                  print(f'{name}: already present')
+                  continue
+              urls = [s['url']]
+              if 'git.kernel.org' in s['url']:
+                  urls.append(s['url'].replace('git.kernel.org', 'kernel.googlesource.com'))
+              ok = False
+              for i in range(4):
+                  url = urls[i % len(urls)]
+                  try:
+                      d.mkdir(parents=True)
+                      run('git', 'init', '-q', str(d))
+                      run('git', '-C', str(d), 'remote', 'add', 'origin', url)
+                      run('git', '-C', str(d), 'sparse-checkout', 'set', '--no-cone', *s['paths'])
+                      run('git', '-C', str(d), 'fetch', '--depth', '1', '--filter=blob:none', 'origin', s['commit'])
+                      run('git', '-C', str(d), 'checkout', '-q', '--detach', s['commit'])
+                      ok = True
+                      break
+                  except subprocess.CalledProcessError as e:
+                      print(f'{name}: attempt {i+1} failed via {url}: {e}', flush=True)
+                      shutil.rmtree(d, ignore_errors=True)
+              if not ok:
+                  sys.exit(f'{name}: could not fetch locked commit {s["commit"]}')
+              rev = subprocess.check_output(['git', '-C', str(d), 'rev-parse', 'HEAD'], text=True).strip()
+              if rev != s['commit']:
+                  sys.exit(f'{name}: fetched {rev}, expected {s["commit"]}')
+              print(f'{name}: locked commit {rev[:12]} fetched')
+          s = lock['supplicant']
+          arc = deps / s['archive']
+          if not arc.exists():
+              tmp = arc.with_suffix('.part')
+              for i in range(4):
+                  try:
+                      with urllib.request.urlopen(s['url'], timeout=120) as r, tmp.open('wb') as o:
+                          shutil.copyfileobj(r, o)
+                      break
+                  except Exception as e:
+                      print(f'supplicant archive attempt {i+1}: {e}', flush=True)
+                      if i == 3:
+                          raise
+              if hashlib.sha256(tmp.read_bytes()).hexdigest() != s['sha256']:
+                  sys.exit('supplicant archive hash mismatch')
+              tmp.replace(arc)
+          d = deps / s['directory']
+          if not d.exists():
+              with tarfile.open(arc) as t:
+                  for m in t.getmembers():
+                      p = (deps / m.name).resolve()
+                      if not (m.isfile() or m.isdir()) or d.resolve() not in (p, *p.parents):
+                          sys.exit(f'unexpected archive member: {m.name}')
+                  t.extractall(deps)
+          print('ath12k locked sources provisioned; upstream --check will verify')
           PY
-          for d in drivers/*/; do
-            if [ -x "${d}tools/fetch-sources.sh" ]; then
-              echo "=== fetch driver sources: $d ==="
-              ( cd "$d" && ./tools/fetch-sources.sh )
-            fi
-          done
       - name: package
         working-directory: device
         env:
