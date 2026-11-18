@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
-          ref: 71400b5663ccb793ef4cea7302d488645011dd61 # 2026-11-15 22:31 last good pairing
+          ref: bba3b57879e94e5ec1632daafb74cbcab8af49a5 # 2026-11-15 22:31 last good pairing
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
