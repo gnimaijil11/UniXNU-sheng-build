@@ -462,10 +462,13 @@ jobs:
         run: |
           # drivers/*/deps are not committed; each submodule carries tools/fetch-sources.sh
           # that installs the exact locked revisions (linux sparse clone, freebsd-src, wpa_supplicant tarball).
+          # freebsd-src releng/15.1 moved past the locked commit; re-pin to the current HEAD.
+          sed -i 's/95719d8a895bf8170851e9844d9b4092b1d2b6fe/bb03631fe3b7a8bfa8071e8063f554528d4e4618/' device/drivers/Ath12kWifi/tools/source-lock.json
+          grep -A2 '"freebsd"' device/drivers/Ath12kWifi/tools/source-lock.json | grep commit
           for d in device/drivers/*/; do
             if [ -x "$d/tools/fetch-sources.sh" ]; then
               echo "== fetch sources: $d"
-              ( cd "$d" && ./tools/fetch-sources.sh ) || echo "WARN: $d fetch failed (upstream rev moved), continuing without it"
+              ( cd "$d" && ./tools/fetch-sources.sh )
             fi
           done
           du -sh device/drivers/*/deps 2>/dev/null || true
