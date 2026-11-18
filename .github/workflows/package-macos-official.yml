@@ -465,7 +465,7 @@ jobs:
           for d in device/drivers/*/; do
             if [ -x "$d/tools/fetch-sources.sh" ]; then
               echo "== fetch sources: $d"
-              ( cd "$d" && ./tools/fetch-sources.sh )
+              ( cd "$d" && ./tools/fetch-sources.sh ) || echo "WARN: $d fetch failed (upstream rev moved), continuing without it"
             fi
           done
           du -sh device/drivers/*/deps 2>/dev/null || true
