@@ -1,0 +1,13 @@
+Nanosic keyboard cover MCU firmware (sheng / Xiaomi Pad 6S Pro).
+
+Source: the public mirror pinned by proprietary-files.txt in this repository:
+  https://raw.githubusercontent.com/ianchb/sheng-firmware/2c1e2729a085c7f0470c855d236e49455c4601f0/nanosic/MCU_Upgrade.bin
+SHA-256: 9eb7213603474d926d3af1124d3c14d63cbfc58ea2f7f7d9fedc088093fd63c5
+Bytes:   82524
+
+build-gop-legacy-display-27.py (kernel archive-19) embeds this RAM image as
+native_keyboard_firmware and only reads device/.cache/firmware/nanosic/.
+The author keeps the blob local; the workflow step "keyboard MCU firmware
+provision" stages this repository copy into the cache (sha256 re-verified),
+falling back to scripts/extract-files.py --section Keyboard.
+Same convention as firmware/novatek/ (committed upstream) and firmware/wcn7850/.
